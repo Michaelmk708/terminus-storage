@@ -1,18 +1,18 @@
 /**
  * upload.ts
  * ─────────────────────────────────────────────────────────────────
- * Functions for uploading encrypted vault files to Storacha (IPFS).
+ * Functions for uploading encrypted vault files to Pinata (IPFS).
  *
  * Upload strategy:
  *  Each vault file produces TWO uploads to IPFS:
  *
  *  1. encryptedFile  (the ciphertext — could be MBs large)
- *     → uploaded as a single file, returns CID_file
+ *     → uploaded via pinFileToIPFS, returns CID_file
  *
  *  2. metadata.json  (small — a few KB)
  *     Bundles: encryptedSymmetricKey + accessControlConditions +
  *              dataToEncryptHash + mimeType + originalFileName + CID_file
- *     → uploaded as a single JSON file, returns CID_metadata
+ *     → uploaded via pinJSONToIPFS, returns CID_metadata
  *
  * The metadata CID is what gets stored on the Solana smart contract.
  * At retrieval time, we fetch metadata.json to reconstruct decrypt().
@@ -30,7 +30,7 @@ import type {
 // ── Public API ─────────────────────────────────────────────────────
 
 /**
- * Uploads an encrypted vault file and its metadata JSON to Storacha.
+ * Uploads an encrypted vault file and its metadata JSON to Pinata.
  * Returns the metadata CID — store this on the Solana smart contract.
  */
 export async function uploadEncryptedVaultFile({
@@ -46,18 +46,20 @@ export async function uploadEncryptedVaultFile({
 }: UploadEncryptedVaultFileParams): Promise<VaultUploadResult> {
   const client = await getStorageClient();
 
-  console.log(`[Storacha] Uploading encrypted file: "${originalFileName}" …`);
+  console.log(`[Pinata] Uploading encrypted file: "${originalFileName}" …`);
 
   // ── Upload 1: ciphertext ───────────────────────────────────────
   const encryptedFileName = `${sanitizeFileName(originalFileName)}.enc`;
-  const encryptedFileForUpload = new File([encryptedFile], encryptedFileName, {
-    type: 'application/octet-stream',
-  });
 
-  const fileCid = await client.uploadFile(encryptedFileForUpload, {
-    onUploadChunk: onProgress ? (chunk) => onProgress({ chunk }) : undefined,
+  // Pinata requires a readable stream or buffer for pinFileToIPFS
+  const buffer = Buffer.from(await encryptedFile.arrayBuffer());
+
+  const fileResult = await client.pinFileToIPFS(buffer, {
+    pinataMetadata: { name: encryptedFileName },
+    pinataOptions: { cidVersion: 1 },
   });
-  console.log(`[Storacha] ✅ Encrypted file CID: ${fileCid}`);
+  const fileCid = fileResult.IpfsHash;
+  console.log(`[Pinata] ✅ Encrypted file CID: ${fileCid}`);
 
   // ── Upload 2: metadata JSON ────────────────────────────────────
   const metadata: VaultFileMetadata = {
@@ -70,24 +72,22 @@ export async function uploadEncryptedVaultFile({
     dataToEncryptHash,
     encryptedSymmetricKey,
     accessControlConditions,
-    encryptedFileCid: fileCid.toString(),
+    encryptedFileCid: fileCid,
     uploadedAt: new Date().toISOString(),
   };
 
-  const metadataFile = new File(
-    [JSON.stringify(metadata, null, 2)],
-    'terminus-metadata.json',
-    { type: 'application/json' }
-  );
-
-  const metadataCid = await client.uploadFile(metadataFile);
-  console.log(`[Storacha] ✅ Metadata CID: ${metadataCid}`);
+  const metadataResult = await client.pinJSONToIPFS(metadata, {
+    pinataMetadata: { name: 'terminus-metadata.json' },
+    pinataOptions: { cidVersion: 1 },
+  });
+  const metadataCid = metadataResult.IpfsHash;
+  console.log(`[Pinata] ✅ Metadata CID: ${metadataCid}`);
 
   return {
-    metadataCid: metadataCid.toString(),
-    encryptedFileCid: fileCid.toString(),
-    metadataUrl: toIpfsGatewayUrl(metadataCid.toString()),
-    encryptedFileUrl: toIpfsGatewayUrl(fileCid.toString()),
+    metadataCid,
+    encryptedFileCid: fileCid,
+    metadataUrl: toIpfsGatewayUrl(metadataCid),
+    encryptedFileUrl: toIpfsGatewayUrl(fileCid),
   };
 }
 
@@ -96,20 +96,20 @@ export async function uploadEncryptedVaultFile({
  * First step in the beneficiary decryption flow.
  */
 export async function fetchVaultMetadata(metadataCid: string): Promise<VaultFileMetadata> {
-  if (!metadataCid) throw new Error('[Storacha] metadataCid is required.');
+  if (!metadataCid) throw new Error('[Pinata] metadataCid is required.');
 
   const url = toIpfsGatewayUrl(metadataCid);
-  console.log(`[Storacha] Fetching metadata from: ${url}`);
+  console.log(`[Pinata] Fetching metadata from: ${url}`);
 
   const resp = await fetchWithRetry(url, 3);
   if (!resp.ok) {
-    throw new Error(`[Storacha] Failed to fetch metadata (${resp.status}): ${url}`);
+    throw new Error(`[Pinata] Failed to fetch metadata (${resp.status}): ${url}`);
   }
 
   const metadata = (await resp.json()) as VaultFileMetadata;
 
   if (!metadata.terminus) {
-    throw new Error('[Storacha] Invalid metadata: missing terminus flag.');
+    throw new Error('[Pinata] Invalid metadata: missing terminus flag.');
   }
 
   return metadata;
@@ -124,11 +124,11 @@ export async function fetchEncryptedFile(
   onProgress?: (event: DownloadProgressEvent) => void
 ): Promise<Blob> {
   const url = toIpfsGatewayUrl(encryptedFileCid);
-  console.log(`[Storacha] Downloading encrypted file from: ${url}`);
+  console.log(`[Pinata] Downloading encrypted file from: ${url}`);
 
   const resp = await fetchWithRetry(url, 3);
   if (!resp.ok) {
-    throw new Error(`[Storacha] Failed to fetch encrypted file (${resp.status}): ${url}`);
+    throw new Error(`[Pinata] Failed to fetch encrypted file (${resp.status}): ${url}`);
   }
 
   if (onProgress && resp.body) {
@@ -162,11 +162,11 @@ export async function fetchEncryptedFile(
 
 /**
  * Maps a raw CID to an IPFS gateway URL.
- * Uses w3s.link (Storacha's gateway) for best performance.
+ * Uses Pinata's gateway by default.
  */
 export function toIpfsGatewayUrl(
   cid: string,
-  gateway = 'https://w3s.link/ipfs'
+  gateway = 'https://gateway.pinata.cloud/ipfs'
 ): string {
   return `${gateway}/${cid}`;
 }
@@ -183,7 +183,7 @@ async function fetchWithRetry(url: string, maxRetries: number): Promise<Response
       lastError = err;
       if (attempt < maxRetries) {
         const delayMs = 1000 * attempt;
-        console.warn(`[Storacha] Fetch attempt ${attempt} failed. Retrying in ${delayMs}ms…`);
+        console.warn(`[Pinata] Fetch attempt ${attempt} failed. Retrying in ${delayMs}ms…`);
         await sleep(delayMs);
       }
     }

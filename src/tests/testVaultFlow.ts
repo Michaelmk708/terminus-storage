@@ -14,7 +14,7 @@
  *
  * BEFORE RUNNING:
  *  cp .env.example .env
- *  Fill in: STORACHA_SPACE_DID, STORACHA_PRINCIPAL_KEY, STORACHA_PROOF,
+ *  Fill in: PINATA_API_KEY, PINATA_SECRET_KEY (or JWT),
  *           LIT_NETWORK=datil-dev, SOLANA_NETWORK=devnet,
  *           TERMINUS_PROGRAM_ID, TEST_VAULT_PDA, TEST_OWNER_SOLANA
  * ─────────────────────────────────────────────────────────────────
@@ -45,9 +45,11 @@ const TEST_OWNER_SOLANA =
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log('\n╔══════════════════════════════════════════════════╗');
+  console.log(`
+╔══════════════════════════════════════════════════╗`);
   console.log('║  TERMINUS — Storage & Encryption E2E Test        ║');
-  console.log('╚══════════════════════════════════════════════════╝\n');
+  console.log(`╚══════════════════════════════════════════════════╝
+`);
 
   // Auth
   console.log('🔑 Generating auth signature …');
@@ -71,7 +73,8 @@ async function main(): Promise<void> {
   );
 
   // ── STEP 1: Store ────────────────────────────────────────────
-  console.log('\n─── STEP 1: Store encrypted file in vault ──────────');
+  console.log(`
+─── STEP 1: Store encrypted file in vault ──────────`);
 
   let storeResult: StoreResult;
   try {
@@ -88,17 +91,20 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log('\n✅ Store result:');
+    console.log(`
+✅ Store result:`);
     console.log('   metadataCid (→ store on Solana):', storeResult.metadataCid);
     console.log('   encryptedFileCid:', storeResult.encryptedFileCid);
     console.log('   metadataUrl:', storeResult.metadataUrl);
+    console.log('   encryptedFileUrl:', storeResult.encryptedFileUrl);
   } catch (err) {
     console.error('❌ Store failed:', err instanceof Error ? err.message : err);
     process.exit(1);
   }
 
   // ── STEP 2: Verify metadata round-trip ───────────────────────
-  console.log('\n─── STEP 2: Verify metadata round-trip ─────────────');
+  console.log(`
+─── STEP 2: Verify metadata round-trip ─────────────`);
   const metadata = await fetchVaultMetadata(storeResult.metadataCid);
 
   console.log('✅ Metadata fetched:');
@@ -108,7 +114,8 @@ async function main(): Promise<void> {
   console.log('   vaultPDA:', metadata.vaultPDA);
 
   // ── STEP 3: Decrypt while vault is locked ────────────────────
-  console.log('\n─── STEP 3: Decrypt attempt (vault locked) ─────────');
+  console.log(`
+─── STEP 3: Decrypt attempt (vault locked) ─────────`);
   console.log('   Expecting TerminusDecryptionError(VAULT_LOCKED) …');
 
   try {
@@ -123,13 +130,15 @@ async function main(): Promise<void> {
   }
 
   // ── STEP 4: Manual instructions ──────────────────────────────
-  console.log('\n─── STEP 4: Manual — unlock vault on devnet ─────────');
+  console.log(`
+─── STEP 4: Manual — unlock vault on devnet ─────────`);
   console.log('   1. Pass metadataCid to Dev 1 to store on-chain.');
   console.log('   2. Have Dev 1 transition the vault state to Unlocked on devnet.');
   console.log('   3. Re-run with TEST_VAULT_UNLOCKED=true');
 
   if (process.env['TEST_VAULT_UNLOCKED'] === 'true') {
-    console.log('\n─── STEP 5: Decrypt (vault UNLOCKED) ────────────────');
+    console.log(`
+─── STEP 5: Decrypt (vault UNLOCKED) ────────────────`);
     const decrypted = await retrieveVaultFile({
       metadataCid: storeResult.metadataCid,
       authSig,
@@ -142,9 +151,11 @@ async function main(): Promise<void> {
     decrypted.revoke();
   }
 
-  console.log('\n╔══════════════════════════════════════════════════╗');
+  console.log(`
+╔══════════════════════════════════════════════════╗`);
   console.log('║  Test complete.                                   ║');
-  console.log('╚══════════════════════════════════════════════════╝\n');
+  console.log(`╚══════════════════════════════════════════════════╝
+`);
 
   process.exit(0);
 }

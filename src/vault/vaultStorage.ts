@@ -4,7 +4,7 @@
  * HIGH-LEVEL VAULT STORAGE API
  *
  * This is the single file that all other Terminus modules interact
- * with. It orchestrates the full Lit + Storacha pipeline behind two
+ * with. It orchestrates the full Lit + Pinata pipeline behind two
  * clean async functions:
  *
  *   storeVaultFile()    — Owner uploads a file into the vault
@@ -32,7 +32,7 @@ import {
   uploadEncryptedVaultFile,
   fetchVaultMetadata,
   fetchEncryptedFile,
-} from '../storacha/upload.js';
+} from '../pinata/upload.js';  // ← changed from storacha to pinata
 import type {
   StoreResult,
   StoreVaultFileParams,
@@ -49,7 +49,7 @@ import type {
 
 /**
  * Encrypts a file with Lit Protocol then uploads the ciphertext and
- * metadata to Storacha (IPFS).
+ * metadata to Pinata (IPFS).
  *
  * @returns The `metadataCid` must be stored in the Solana smart contract.
  *
@@ -72,7 +72,8 @@ export async function storeVaultFile({
   authSig,
   onProgress,
 }: StoreVaultFileParams): Promise<StoreResult> {
-  console.log(`\n[VaultStorage] ── STORE ──────────────────────────────────`);
+  console.log(`
+[VaultStorage] ── STORE ──────────────────────────────────`);
   console.log(`[VaultStorage] File: ${file instanceof File ? file.name : 'blob'} | Condition: ${conditionType}`);
   console.log(`[VaultStorage] Vault PDA: ${vaultPDA}`);
 
@@ -86,8 +87,8 @@ export async function storeVaultFile({
     authSig,
   });
 
-  // Step 2: Upload (Storacha / IPFS)
-  console.log('[VaultStorage] Step 2/2 — Uploading to Storacha (IPFS) …');
+  // Step 2: Upload (Pinata / IPFS)
+  console.log('[VaultStorage] Step 2/2 — Uploading to Pinata (IPFS) …');
   const uploadResult = await uploadEncryptedVaultFile({
     ...encrypted,
     vaultPDA,
@@ -165,7 +166,8 @@ export async function retrieveVaultFile({
   authSig,
   onProgress,
 }: RetrieveVaultFileParams): Promise<DecryptedVaultFile> {
-  console.log(`\n[VaultStorage] ── RETRIEVE ────────────────────────────────`);
+  console.log(`
+[VaultStorage] ── RETRIEVE ────────────────────────────────`);
   console.log(`[VaultStorage] Metadata CID: ${metadataCid}`);
 
   // Step 1: Fetch metadata JSON from IPFS

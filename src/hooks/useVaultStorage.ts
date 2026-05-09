@@ -19,12 +19,10 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useWallets } from '@privy-io/react-auth'; // swap for Web3Auth if needed
-import {
-  storeVaultFile,
-  retrieveVaultFile,
-} from '../vault/vaultStorage.js';
+import { storeVaultFile } from '../vault/vaultStorage.js';
 import { generateAuthSigFromSigner } from '../lit/authHelpers.js';
-import { TerminusDecryptionError } from '../lit/decrypt.js';
+import { decryptVaultFile, TerminusDecryptionError } from '../lit/decrypt.js';
+import { fetchVaultMetadata } from '../pinata/upload.js';
 import type {
   StoreResult,
   DecryptedFileEntry,
@@ -32,6 +30,8 @@ import type {
   UploadProgressEvent,
   DownloadProgressEvent,
 } from '../types.js';
+
+const PINATA_GATEWAY = 'https://gateway.pinata.cloud/ipfs';
 
 // ── Hook return type ───────────────────────────────────────────────
 
@@ -112,6 +112,8 @@ export function useVaultStorage(
           conditionType,
           authSig,
           onProgress: (e: UploadProgressEvent) => {
+            // Note: Pinata SDK doesn't support upload progress callbacks
+            // This will only fire for the download/encryption phase
             if (e.percent !== undefined) setUploadProgress(Math.round(e.percent));
           },
         });
@@ -140,23 +142,66 @@ export function useVaultStorage(
         const signer = await getSigner();
         const authSig = await generateAuthSigFromSigner(signer);
 
-        const result = await retrieveVaultFile({
-          metadataCid,
-          authSig,
-          onProgress: (e: DownloadProgressEvent) => {
-            setClaimProgress(Math.round(e.percent));
-          },
+        // Step 1: Fetch metadata from Pinata gateway
+        console.log(`[useVaultStorage] Fetching metadata: ${metadataCid}`);
+        const metadataResponse = await fetch(`${PINATA_GATEWAY}/${metadataCid}`);
+        if (!metadataResponse.ok) {
+          throw new Error(`Metadata not found (${metadataResponse.status})`);
+        }
+        const metadata = await metadataResponse.json();
+
+        // Step 2: Fetch encrypted file from Pinata gateway
+        console.log(`[useVaultStorage] Fetching encrypted file: ${metadata.encryptedFileCid}`);
+        const fileResponse = await fetch(`${PINATA_GATEWAY}/${metadata.encryptedFileCid}`);
+        if (!fileResponse.ok) {
+          throw new Error(`Encrypted file not found (${fileResponse.status})`);
+        }
+
+        // Track download progress if Content-Length is available
+        const contentLength = fileResponse.headers.get('Content-Length');
+        const reader = fileResponse.body!.getReader();
+        let receivedLength = 0;
+        const chunks: Uint8Array[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          chunks.push(value);
+          receivedLength += value.length;
+          
+          if (contentLength) {
+            const percent = (receivedLength / parseInt(contentLength)) * 100;
+            setClaimProgress(Math.round(percent));
+          }
+        }
+
+        // Combine chunks into single Blob
+        const encryptedBlob = new Blob(chunks, { 
+          type: 'application/octet-stream' 
         });
 
-        objectUrlsRef.current.push(result.objectUrl);
+        // Step 3: Decrypt with Lit Protocol
+        console.log('[useVaultStorage] Decrypting file with Lit Protocol…');
+        const decrypted = await decryptVaultFile({
+          encryptedFile: encryptedBlob,
+          encryptedSymmetricKey: metadata.encryptedSymmetricKey,
+          accessControlConditions: metadata.accessControlConditions,
+          dataToEncryptHash: metadata.dataToEncryptHash,
+          mimeType: metadata.mimeType,
+          originalFileName: metadata.originalFileName,
+          authSig,
+        });
+
+        objectUrlsRef.current.push(decrypted.objectUrl);
 
         const entry: DecryptedFileEntry = {
           metadataCid,
-          objectUrl: result.objectUrl,
-          originalFileName: result.originalFileName,
-          mimeType: result.mimeType,
-          blob: result.blob,
-          text: result.mimeType.startsWith('text/') ? await result.text() : null,
+          objectUrl: decrypted.objectUrl,
+          originalFileName: metadata.originalFileName,
+          mimeType: metadata.mimeType,
+          blob: decrypted.blob,
+          text: metadata.mimeType.startsWith('text/') ? await decrypted.text() : null,
         };
 
         setDecryptedFiles((prev) => [...prev, entry]);

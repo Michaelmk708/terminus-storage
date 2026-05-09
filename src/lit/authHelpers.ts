@@ -17,8 +17,8 @@
  * ─────────────────────────────────────────────────────────────────
  */
 
-import * as LitJsSdk from '@lit-protocol/lit-node-client';
-import { LitAbility } from '@lit-protocol/constants';
+import { LitNodeClient } from '@lit-protocol/lit-node-client';
+import { LitAbility, LitActionResource } from '@lit-protocol/constants';
 import type { Signer } from '@solana/web3.js';
 import type { AuthSig } from '../types.js';
 import { getLitClient } from './litClient.js';
@@ -52,7 +52,7 @@ export async function generateAuthSigFromSigner(signer: Signer): Promise<AuthSig
     typeof window !== 'undefined' ? window.location.origin : 'https://terminus.app';
   const expiration = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(); // 24 h
 
-  const siweMessage = LitJsSdk.createSiweMessage({
+  const siweMessage = LitNodeClient.createSiweMessage({
     domain,
     address,
     statement: 'Sign to access your Terminus Vault. This does not initiate a transaction.',

@@ -31,12 +31,12 @@ export {
 // ── Lit client ─────────────────────────────────────────────────────
 export { getLitClient, disconnectLit } from './lit/litClient.js';
 
-// ── Storacha helpers ───────────────────────────────────────────────
+// ── Pinata helpers ─────────────────────────────────────────────────
 export {
   fetchVaultMetadata,
   fetchEncryptedFile,
   toIpfsGatewayUrl,
-} from './storacha/upload.js';
+} from './pinata/upload.js';
 
 // ── Access condition builders ──────────────────────────────────────
 export {
@@ -47,7 +47,7 @@ export {
 
 // ── Error classes ──────────────────────────────────────────────────
 export { TerminusDecryptionError } from './lit/decrypt.js';
-export { StorachaConfigError } from './storacha/storageClient.js';
+export { PinataConfigError } from './pinata/storageClient.js';
 
 // ── All types ──────────────────────────────────────────────────────
 export type {
